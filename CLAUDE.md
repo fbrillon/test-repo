@@ -153,6 +153,26 @@ rm token.pickle
 - `credentials.json` — Google OAuth client secrets (not committed)
 - `token.pickle` — saved OAuth token, local only (not committed)
 
+## Security model
+
+### What is isolated
+
+- Each user's Gmail token is in a separate secret (`gmail-agent/{user}/token`)
+- `user_id` is validated on entry — alphanumerics, hyphens, underscores only (no path traversal)
+- The IAM policy uses two scoped resource ARNs:
+  - `gmail-agent/anthropic-api-key*` — read-only, shared key
+  - `gmail-agent/*/*` — read/write, only two-segment paths (per-user secrets); cannot reach flat secrets outside the namespace
+
+### Remaining limitation — shared Lambda
+
+With a single shared Lambda, cross-user access is enforced **by application code**, not by IAM. The Lambda role has `gmail-agent/*/*` access across all users. A bug in `set_user()` or the event parsing could in theory cause one user's invocation to load another's token.
+
+**Acceptable for:** personal use, small trusted groups, internal tooling.
+
+**Not acceptable for:** a commercial multi-tenant SaaS where users are strangers.
+
+For stronger isolation (IAM-enforced), each user would need a dedicated Lambda with a dedicated IAM role scoped to `gmail-agent/{user_id}/*`. That eliminates any cross-user risk but means N Lambda deployments.
+
 ## Notes
 
 - The agent reads but does not delete, archive, or send any emails

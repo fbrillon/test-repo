@@ -9,6 +9,7 @@ Lambda mode : reads/writes credentials and token from AWS Secrets Manager.
 import json
 import os
 import pickle
+import re
 from pathlib import Path
 
 from google.auth.transport.requests import Request
@@ -28,8 +29,16 @@ def _sm_client():
     return boto3.client("secretsmanager", region_name=os.environ.get("AWS_REGION", "us-east-1"))
 
 
+_USER_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
+
+
 def set_user(user_id: str) -> None:
     """Scope all Secrets Manager keys to a specific user. Call before get_gmail_service()."""
+    if not _USER_ID_RE.match(user_id):
+        raise ValueError(
+            f"Invalid user_id {user_id!r}. "
+            "Only alphanumerics, hyphens and underscores are allowed (max 64 chars)."
+        )
     os.environ["SECRET_PREFIX"] = f"gmail-agent/{user_id}"
 
 
