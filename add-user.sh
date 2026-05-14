@@ -24,7 +24,7 @@ python agent.py --user "$USER_ID" --upload-token
 
 # Step 2 — build initial classification profile from historical emails (no PII stored)
 echo "==> Building classification profile for user: $USER_ID"
-python onboarding.py --user "$USER_ID"
+python profiler.py --user "$USER_ID"
 
 # Step 3 — create an EventBridge Scheduler schedule for this user
 echo "==> Creating EventBridge schedule: gmail-agent-$USER_ID ($SCHEDULE)"

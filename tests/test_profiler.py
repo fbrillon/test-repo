@@ -1,73 +1,73 @@
-"""Tests for onboarding.py — signal extraction helpers."""
+"""Tests for profiler.py — signal extraction helpers."""
 
 
 def test_sender_type_newsletter():
-    from onboarding import _sender_type
+    from profiler import _sender_type
 
     headers = [{"name": "From", "value": "news@example.com"}, {"name": "List-Unsubscribe", "value": "<mailto:unsub@example.com>"}]
     assert _sender_type(headers) == "newsletter"
 
 
 def test_sender_type_mailing_list():
-    from onboarding import _sender_type
+    from profiler import _sender_type
 
     headers = [{"name": "From", "value": "list@example.com"}, {"name": "List-Id", "value": "<mylist.example.com>"}]
     assert _sender_type(headers) == "mailing_list"
 
 
 def test_sender_type_no_reply():
-    from onboarding import _sender_type
+    from profiler import _sender_type
 
     headers = [{"name": "From", "value": "no-reply@service.com"}]
     assert _sender_type(headers) == "no_reply"
 
 
 def test_sender_type_automated():
-    from onboarding import _sender_type
+    from profiler import _sender_type
 
     headers = [{"name": "From", "value": "notifications@service.com"}]
     assert _sender_type(headers) == "automated"
 
 
 def test_sender_type_personal():
-    from onboarding import _sender_type
+    from profiler import _sender_type
 
     headers = [{"name": "From", "value": "Alice Smith <alice@personal.com>"}]
     assert _sender_type(headers) == "personal"
 
 
 def test_subject_flags_reply():
-    from onboarding import _subject_flags
+    from profiler import _subject_flags
 
     assert "is_reply" in _subject_flags("Re: your question")
 
 
 def test_subject_flags_transactional():
-    from onboarding import _subject_flags
+    from profiler import _subject_flags
 
     assert "transactional" in _subject_flags("Your invoice is ready")
 
 
 def test_subject_flags_urgency():
-    from onboarding import _subject_flags
+    from profiler import _subject_flags
 
     assert "urgency_signal" in _subject_flags("URGENT: action required")
 
 
 def test_subject_flags_empty():
-    from onboarding import _subject_flags
+    from profiler import _subject_flags
 
     assert _subject_flags("Hello there") == []
 
 
 def test_extract_thread_signals_empty():
-    from onboarding import extract_thread_signals
+    from profiler import extract_thread_signals
 
     assert extract_thread_signals({"messages": []}, {}) is None
 
 
 def test_extract_thread_signals_basic():
-    from onboarding import extract_thread_signals
+    from profiler import extract_thread_signals
 
     thread = {
         "messages": [
@@ -94,7 +94,7 @@ def test_extract_thread_signals_basic():
 
 
 def test_extract_thread_signals_triage_label():
-    from onboarding import extract_thread_signals
+    from profiler import extract_thread_signals
 
     triage_map = {"label_act_now_id": "Act_Now"}
     thread = {
@@ -114,7 +114,7 @@ def test_extract_thread_signals_triage_label():
 
 
 def test_signals_to_text():
-    from onboarding import signals_to_text
+    from profiler import signals_to_text
 
     signals = [
         {

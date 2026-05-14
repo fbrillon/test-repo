@@ -54,7 +54,7 @@ class UserProfile:
         return "\n".join(lines)
 
 
-# Prompt used by the onboarding agent to extract an anonymized profile
+# Prompt used by profiler.py to extract an anonymized profile
 PROFILE_EXTRACTION_PROMPT = """\
 You are analyzing anonymized signals from a sample of emails to build a \
 classification profile for improving future triage accuracy.

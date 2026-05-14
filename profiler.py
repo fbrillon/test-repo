@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-Onboarding agent: builds an initial user profile from historical Gmail threads.
+Profiler: builds and refreshes the user's classification profile from Gmail history.
 
 Extracts PII-free structural signals from recent threads and uses Claude to
-identify behavioral classification patterns. No names, addresses, subjects, or
+identify behavioral classification patterns. Run periodically to keep the
+profile current as email habits evolve. No names, addresses, subjects, or
 message content are sent to the Claude API — only anonymized structural signals.
 
 Usage:
-    python onboarding.py
-    python onboarding.py --user alice --sample-size 150
+    python profiler.py
+    python profiler.py --user alice --sample-size 150
 """
 
 import argparse

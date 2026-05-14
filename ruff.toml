@@ -9,4 +9,4 @@ ignore = [
 exclude = ["tests/conftest.py"]
 
 [lint.isort]
-known-first-party = ["agent", "gmail_auth", "lambda_function", "onboarding", "user_profile"]
+known-first-party = ["agent", "gmail_auth", "lambda_function", "profiler", "user_profile"]
