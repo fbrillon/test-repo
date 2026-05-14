@@ -19,10 +19,16 @@ Parameters:
     Default: 50
     Description: Max unread threads to process per run
 
-  SecretPrefix:
+  UserId:
     Type: String
-    Default: gmail-agent
-    Description: Prefix for Secrets Manager keys (gmail-agent/token, gmail-agent/credentials)
+    Default: ""
+    Description: >
+      Optional user identifier for multi-user deployments.
+      When set, secrets are stored under gmail-agent/{UserId}/token etc.
+      Leave empty for single-user deployment (uses gmail-agent/ prefix).
+
+Conditions:
+  HasUserId: !Not [!Equals [!Ref UserId, ""]]
 
 Resources:
 
@@ -31,7 +37,7 @@ Resources:
   AnthropicSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
-      Name: !Sub "${SecretPrefix}/anthropic-api-key"
+      Name: gmail-agent/anthropic-api-key
       SecretString: !Ref AnthropicApiKey
 
   # gmail-agent/token and gmail-agent/credentials are created by:
@@ -61,7 +67,7 @@ Resources:
                   - secretsmanager:GetSecretValue
                   - secretsmanager:PutSecretValue
                   - secretsmanager:CreateSecret
-                Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${SecretPrefix}/*"
+                Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:gmail-agent/*"
 
   # ── Lambda ────────────────────────────────────────────────────────────────
 
@@ -75,7 +81,10 @@ Resources:
       Environment:
         Variables:
           LAMBDA_MODE: "1"
-          SECRET_PREFIX: !Ref SecretPrefix
+          SECRET_PREFIX: !If
+            - HasUserId
+            - !Sub "gmail-agent/${UserId}"
+            - gmail-agent
           MAX_THREADS: !Ref MaxThreads
           # ANTHROPIC_API_KEY is read from Secrets Manager at runtime in gmail_auth.py
           # Load it in lambda_function.py via boto3 to avoid storing in plain env vars

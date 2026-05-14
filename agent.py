@@ -16,18 +16,11 @@ from typing import Any
 import anthropic
 from dotenv import load_dotenv
 
-from gmail_auth import get_gmail_service, upload_token_to_secrets_manager
+from gmail_auth import get_gmail_service, set_user, upload_token_to_secrets_manager
 
 load_dotenv()
 
-TRIAGE_LABELS = {
-    "Act_Now":      "Label_31",
-    "Next_Moves":   "Label_32",
-    "Track_It":     "Label_34",
-    "Stay_Informed": "Label_28",
-    "Skip_It":      "Label_33",
-}
-TRIAGE_LABEL_IDS = set(TRIAGE_LABELS.values())
+TRIAGE_LABEL_NAMES = ["Act_Now", "Next_Moves", "Track_It", "Stay_Informed", "Skip_It"]
 
 SYSTEM_PROMPT = """\
 You are an email triage assistant. Your job is to classify unread Gmail threads
@@ -52,6 +45,24 @@ Rules:
 - Threads that already have a triage label are pre-filtered and won't appear in results.
 - Be decisive. A brief glance at subject + sender + snippet is often enough to classify.
 """
+
+def resolve_label_ids(service) -> dict[str, str]:
+    """Map triage label names to Gmail IDs, creating any that don't exist yet."""
+    response = service.users().labels().list(userId="me").execute()
+    existing = {l["name"]: l["id"] for l in response.get("labels", [])}
+    result = {}
+    for name in TRIAGE_LABEL_NAMES:
+        if name in existing:
+            result[name] = existing[name]
+        else:
+            created = service.users().labels().create(
+                userId="me",
+                body={"name": name, "labelListVisibility": "labelShow", "messageListVisibility": "show"},
+            ).execute()
+            result[name] = created["id"]
+            print(f"Created label: {name} ({created['id']})")
+    return result
+
 
 TOOLS = [
     {
@@ -94,7 +105,7 @@ TOOLS = [
                 "thread_id": {"type": "string", "description": "The Gmail thread ID."},
                 "label": {
                     "type": "string",
-                    "enum": list(TRIAGE_LABELS.keys()),
+                    "enum": TRIAGE_LABEL_NAMES,
                     "description": "The triage label to apply.",
                 },
                 "reason": {
@@ -139,7 +150,9 @@ def _header(headers: list[dict], name: str) -> str:
     return ""
 
 
-def search_unread_threads(service, max_results: int, page_token: str | None = None) -> dict:
+def search_unread_threads(
+    service, max_results: int, triage_label_ids: set[str], page_token: str | None = None
+) -> dict:
     params: dict[str, Any] = {
         "userId": "me",
         "q": "is:unread -in:draft",
@@ -154,7 +167,6 @@ def search_unread_threads(service, max_results: int, page_token: str | None = No
 
     threads = []
     for t in raw_threads:
-        # Fetch just metadata to get subject/sender cheaply
         meta = (
             service.threads()
             .get(userId="me", id=t["id"], format="metadata", metadataHeaders=["Subject", "From"])
@@ -164,8 +176,7 @@ def search_unread_threads(service, max_results: int, page_token: str | None = No
         headers = first_msg.get("payload", {}).get("headers", [])
         label_ids = set(first_msg.get("labelIds", []))
 
-        # Skip threads that already have a triage label
-        if label_ids & TRIAGE_LABEL_IDS:
+        if label_ids & triage_label_ids:
             continue
 
         threads.append(
@@ -200,8 +211,8 @@ def get_thread(service, thread_id: str) -> dict:
     return {"thread_id": thread_id, "message_count": len(thread["messages"]), "messages": messages}
 
 
-def apply_label(service, thread_id: str, label_name: str, dry_run: bool) -> dict:
-    label_id = TRIAGE_LABELS[label_name]
+def apply_label(service, thread_id: str, label_name: str, label_map: dict[str, str], dry_run: bool) -> dict:
+    label_id = label_map[label_name]
     if not dry_run:
         service.threads().modify(
             userId="me",
@@ -217,6 +228,9 @@ def apply_label(service, thread_id: str, label_name: str, dry_run: bool) -> dict
 
 def run_agent(service, max_threads: int, dry_run: bool, verbose: bool) -> None:
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
+    label_map = resolve_label_ids(service)
+    triage_label_ids = set(label_map.values())
 
     stats = {"labeled": 0, "skipped": 0}
     messages: list[dict] = [
@@ -272,6 +286,7 @@ def run_agent(service, max_threads: int, dry_run: bool, verbose: bool) -> None:
                     result = search_unread_threads(
                         service,
                         max_results=max_threads - stats["labeled"],
+                        triage_label_ids=triage_label_ids,
                         page_token=tool_input.get("page_token"),
                     )
                 elif tool_name == "get_thread":
@@ -281,7 +296,8 @@ def run_agent(service, max_threads: int, dry_run: bool, verbose: bool) -> None:
                         service,
                         tool_input["thread_id"],
                         tool_input["label"],
-                        dry_run,
+                        label_map=label_map,
+                        dry_run=dry_run,
                     )
                     label = tool_input["label"]
                     reason = tool_input.get("reason", "")
@@ -322,12 +338,16 @@ def main():
     parser.add_argument("--max-threads", type=int, default=30, help="Max threads to process (default: 30)")
     parser.add_argument("--dry-run", action="store_true", help="Classify without applying labels")
     parser.add_argument("--verbose", action="store_true", help="Show every tool call")
+    parser.add_argument("--user", default=None, help="User ID for multi-user setups (scopes secrets to gmail-agent/{user})")
     parser.add_argument(
         "--upload-token",
         action="store_true",
-        help="Authenticate locally and upload OAuth token to AWS Secrets Manager (one-time Lambda setup)",
+        help="Authenticate locally and upload OAuth token to AWS Secrets Manager (one-time setup per user)",
     )
     args = parser.parse_args()
+
+    if args.user:
+        set_user(args.user)
 
     if args.upload_token:
         upload_token_to_secrets_manager()

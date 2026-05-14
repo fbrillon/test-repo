@@ -28,6 +28,11 @@ def _sm_client():
     return boto3.client("secretsmanager", region_name=os.environ.get("AWS_REGION", "us-east-1"))
 
 
+def set_user(user_id: str) -> None:
+    """Scope all Secrets Manager keys to a specific user. Call before get_gmail_service()."""
+    os.environ["SECRET_PREFIX"] = f"gmail-agent/{user_id}"
+
+
 def _secret_name(key: str) -> str:
     prefix = os.environ.get("SECRET_PREFIX", "gmail-agent")
     return f"{prefix}/{key}"
