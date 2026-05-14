@@ -1,0 +1,21 @@
+version = 0.1
+
+[default.global.parameters]
+stack_name = "gmail-agent"
+region     = "us-east-1"
+
+[default.build.parameters]
+cached   = true
+parallel = true
+
+[default.deploy.parameters]
+capabilities          = "CAPABILITY_IAM"
+confirm_changeset     = false
+resolve_s3            = true          # SAM auto-creates and manages the S3 artifact bucket
+image_repositories    = []            # SAM auto-creates the ECR repo
+parameter_overrides   = [
+  "MaxThreads=50",
+]
+# Secrets passed via CI --parameter-overrides (not stored here):
+#   AnthropicApiKey   → from GitHub secret ANTHROPIC_API_KEY
+#   AlertEmail        → from GitHub secret ALERT_EMAIL (optional)

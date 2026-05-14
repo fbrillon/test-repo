@@ -44,7 +44,7 @@ jobs:
       - name: SAM deploy
         run: |
           sam deploy \
-            --no-confirm-changeset \
             --no-fail-on-empty-changeset \
             --parameter-overrides \
-              AnthropicApiKey=${{ secrets.ANTHROPIC_API_KEY }}
+              AnthropicApiKey=${{ secrets.ANTHROPIC_API_KEY }} \
+              AlertEmail=${{ secrets.ALERT_EMAIL }}
