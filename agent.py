@@ -49,7 +49,7 @@ Rules:
 def resolve_label_ids(service) -> dict[str, str]:
     """Map triage label names to Gmail IDs, creating any that don't exist yet."""
     response = service.users().labels().list(userId="me").execute()
-    existing = {l["name"]: l["id"] for l in response.get("labels", [])}
+    existing = {lbl["name"]: lbl["id"] for lbl in response.get("labels", [])}
     result = {}
     for name in TRIAGE_LABEL_NAMES:
         if name in existing:
