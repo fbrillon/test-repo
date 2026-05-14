@@ -7,3 +7,6 @@ ignore = [
     "E501",  # line too long — handled by formatter
 ]
 exclude = ["tests/conftest.py"]
+
+[lint.isort]
+known-first-party = ["agent", "gmail_auth", "lambda_function", "onboarding", "user_profile"]

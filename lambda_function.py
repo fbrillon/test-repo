@@ -17,6 +17,7 @@ import boto3
 
 from agent import run_agent
 from gmail_auth import get_gmail_service, set_user
+from user_profile import load_profile
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -50,17 +51,14 @@ def handler(event: dict, context) -> dict:
     dry_run = bool(event.get("dry_run") or os.environ.get("DRY_RUN", ""))
 
     service = get_gmail_service()
-    run_agent(service, max_threads=max_threads, dry_run=dry_run, verbose=True)
+    profile = load_profile(user_id=user_id)
+    run_agent(
+        service,
+        max_threads=max_threads,
+        dry_run=dry_run,
+        verbose=True,
+        profile=profile,
+        user_id=user_id,
+    )
 
     return {"statusCode": 200, "body": json.dumps({"status": "ok", "user_id": user_id or "default"})}
-
-
-    max_threads = int(os.environ.get("MAX_THREADS", "50"))
-    dry_run = os.environ.get("DRY_RUN", "").lower() in ("1", "true", "yes")
-
-    logger.info("Starting Gmail triage agent (max_threads=%d, dry_run=%s)", max_threads, dry_run)
-
-    service = get_gmail_service()
-    run_agent(service, max_threads=max_threads, dry_run=dry_run, verbose=True)
-
-    return {"statusCode": 200, "body": json.dumps("Triage complete")}

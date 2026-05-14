@@ -17,21 +17,22 @@ import anthropic
 from dotenv import load_dotenv
 
 from gmail_auth import get_gmail_service, set_user, upload_token_to_secrets_manager
+from user_profile import UserProfile, load_profile, save_profile
 
 load_dotenv()
 
 TRIAGE_LABEL_NAMES = ["Act_Now", "Next_Moves", "Track_It", "Stay_Informed", "Skip_It"]
 
-SYSTEM_PROMPT = """\
+_BASE_SYSTEM_PROMPT = """\
 You are an email triage assistant. Your job is to classify unread Gmail threads
 and apply exactly one triage label to each, based on content and urgency.
 
 Label definitions:
-- Act_Now:      Requires a reply or concrete action today. Someone is waiting on you.
-- Next_Moves:   Requires action but not urgent. Can be handled in the next few days.
-- Track_It:     Receipt, order confirmation, or thread where you are waiting on a reply. Monitor only.
+- Act_Now:       Requires a reply or concrete action today. Someone is waiting on you.
+- Next_Moves:    Requires action but not urgent. Can be handled in the next few days.
+- Track_It:      Receipt, order confirmation, or thread where you are waiting on a reply. Monitor only.
 - Stay_Informed: Informational — worth reading but no action required.
-- Skip_It:      Newsletter, promotion, automated notification, or anything not worth reading.
+- Skip_It:       Newsletter, promotion, automated notification, or anything not worth reading.
 
 Your process:
 1. Call search_unread_threads to get a page of unread threads.
@@ -45,6 +46,15 @@ Rules:
 - Threads that already have a triage label are pre-filtered and won't appear in results.
 - Be decisive. A brief glance at subject + sender + snippet is often enough to classify.
 """
+
+
+def _build_system_prompt(profile: "UserProfile | None") -> str:
+    if not profile:
+        return _BASE_SYSTEM_PROMPT
+    ctx = profile.to_prompt_context()
+    if not ctx:
+        return _BASE_SYSTEM_PROMPT
+    return _BASE_SYSTEM_PROMPT + "\n" + ctx
 
 def resolve_label_ids(service) -> dict[str, str]:
     """Map triage label names to Gmail IDs, creating any that don't exist yet."""
@@ -226,13 +236,44 @@ def apply_label(service, thread_id: str, label_name: str, label_map: dict[str, s
 # Agentic loop
 # ---------------------------------------------------------------------------
 
-def run_agent(service, max_threads: int, dry_run: bool, verbose: bool) -> None:
+def _update_profile(
+    profile: "UserProfile | None",
+    label_counts: dict[str, int],
+    user_id: str,
+) -> None:
+    """Merge this run's label counts into the persisted profile."""
+    new_total = sum(label_counts.values())
+    if not new_total:
+        return
+    if profile is None:
+        profile = UserProfile()
+    old_total = profile.emails_analyzed
+    combined_total = old_total + new_total
+    old_dist = profile.label_distribution or {}
+    combined: dict[str, float] = {}
+    for label in TRIAGE_LABEL_NAMES:
+        old_count = old_dist.get(label, 0.0) * old_total
+        combined[label] = (old_count + label_counts.get(label, 0)) / combined_total
+    profile.emails_analyzed = combined_total
+    profile.label_distribution = combined
+    save_profile(profile, user_id=user_id)
+
+
+def run_agent(
+    service,
+    max_threads: int,
+    dry_run: bool,
+    verbose: bool,
+    profile: "UserProfile | None" = None,
+    user_id: str = "",
+) -> None:
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
     label_map = resolve_label_ids(service)
     triage_label_ids = set(label_map.values())
 
-    stats = {"labeled": 0, "skipped": 0}
+    stats = {"labeled": 0}
+    label_counts: dict[str, int] = {name: 0 for name in TRIAGE_LABEL_NAMES}
     messages: list[dict] = [
         {
             "role": "user",
@@ -250,7 +291,7 @@ def run_agent(service, max_threads: int, dry_run: bool, verbose: bool) -> None:
         response = client.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=4096,
-            system=SYSTEM_PROMPT,
+            system=_build_system_prompt(profile),
             tools=TOOLS,
             messages=messages,
         )
@@ -302,6 +343,7 @@ def run_agent(service, max_threads: int, dry_run: bool, verbose: bool) -> None:
                     label = tool_input["label"]
                     reason = tool_input.get("reason", "")
                     stats["labeled"] += 1
+                    label_counts[label] = label_counts.get(label, 0) + 1
                     marker = "[DRY-RUN] " if dry_run else ""
                     print(f"{marker}{label:14s}  {reason}")
                 else:
@@ -327,6 +369,8 @@ def run_agent(service, max_threads: int, dry_run: bool, verbose: bool) -> None:
         messages.append({"role": "user", "content": tool_results})
 
     print(f"\nDone. Labeled: {stats['labeled']} threads.")
+    if not dry_run:
+        _update_profile(profile, label_counts, user_id)
 
 
 # ---------------------------------------------------------------------------
@@ -358,7 +402,15 @@ def main():
         sys.exit("ERROR: ANTHROPIC_API_KEY environment variable is not set.")
 
     service = get_gmail_service()
-    run_agent(service, max_threads=args.max_threads, dry_run=args.dry_run, verbose=args.verbose)
+    profile = load_profile(user_id=args.user or "")
+    run_agent(
+        service,
+        max_threads=args.max_threads,
+        dry_run=args.dry_run,
+        verbose=args.verbose,
+        profile=profile,
+        user_id=args.user or "",
+    )
 
 
 if __name__ == "__main__":

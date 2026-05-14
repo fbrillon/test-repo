@@ -3,3 +3,4 @@ token.pickle
 .env
 __pycache__/
 *.pyc
+profiles/

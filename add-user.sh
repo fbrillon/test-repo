@@ -22,7 +22,11 @@ SCHEDULE="${4:-rate(15 minutes)}"
 echo "==> Authenticating Gmail for user: $USER_ID"
 python agent.py --user "$USER_ID" --upload-token
 
-# Step 2 — create an EventBridge Scheduler schedule for this user
+# Step 2 — build initial classification profile from historical emails (no PII stored)
+echo "==> Building classification profile for user: $USER_ID"
+python onboarding.py --user "$USER_ID"
+
+# Step 3 — create an EventBridge Scheduler schedule for this user
 echo "==> Creating EventBridge schedule: gmail-agent-$USER_ID ($SCHEDULE)"
 aws scheduler create-schedule \
   --name "gmail-agent-$USER_ID" \
