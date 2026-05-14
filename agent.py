@@ -9,22 +9,16 @@ import argparse
 import base64
 import json
 import os
-import pickle
 import re
 import sys
-from pathlib import Path
 from typing import Any
 
 import anthropic
 from dotenv import load_dotenv
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
+
+from gmail_auth import get_gmail_service, upload_token_to_secrets_manager
 
 load_dotenv()
-
-SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
 
 TRIAGE_LABELS = {
     "Act_Now":      "Label_31",
@@ -117,28 +111,6 @@ TOOLS = [
 # ---------------------------------------------------------------------------
 # Gmail helpers
 # ---------------------------------------------------------------------------
-
-def get_gmail_service(credentials_path: str = "credentials.json", token_path: str = "token.pickle"):
-    creds = None
-    if Path(token_path).exists():
-        with open(token_path, "rb") as f:
-            creds = pickle.load(f)
-
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            if not Path(credentials_path).exists():
-                sys.exit(
-                    f"ERROR: {credentials_path} not found.\n"
-                    "Download OAuth credentials from Google Cloud Console and save as credentials.json."
-                )
-            flow = InstalledAppFlow.from_client_secrets_file(credentials_path, SCOPES)
-            creds = flow.run_local_server(port=0)
-        with open(token_path, "wb") as f:
-            pickle.dump(creds, f)
-
-    return build("gmail", "v1", credentials=creds)
 
 
 def _decode_body(part: dict) -> str:
@@ -350,7 +322,16 @@ def main():
     parser.add_argument("--max-threads", type=int, default=30, help="Max threads to process (default: 30)")
     parser.add_argument("--dry-run", action="store_true", help="Classify without applying labels")
     parser.add_argument("--verbose", action="store_true", help="Show every tool call")
+    parser.add_argument(
+        "--upload-token",
+        action="store_true",
+        help="Authenticate locally and upload OAuth token to AWS Secrets Manager (one-time Lambda setup)",
+    )
     args = parser.parse_args()
+
+    if args.upload_token:
+        upload_token_to_secrets_manager()
+        return
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:

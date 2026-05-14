@@ -1,0 +1,99 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+
+Description: Gmail Email Labeling Agent — Lambda + EventBridge
+
+Parameters:
+  AnthropicApiKey:
+    Type: String
+    NoEcho: true
+    Description: Anthropic API key (stored in Secrets Manager, not in env vars)
+
+  ScheduleExpression:
+    Type: String
+    Default: rate(15 minutes)
+    Description: How often to run the triage agent
+
+  MaxThreads:
+    Type: Number
+    Default: 50
+    Description: Max unread threads to process per run
+
+  SecretPrefix:
+    Type: String
+    Default: gmail-agent
+    Description: Prefix for Secrets Manager keys (gmail-agent/token, gmail-agent/credentials)
+
+Resources:
+
+  # ── Secrets ──────────────────────────────────────────────────────────────
+
+  AnthropicSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${SecretPrefix}/anthropic-api-key"
+      SecretString: !Ref AnthropicApiKey
+
+  # gmail-agent/token and gmail-agent/credentials are created by:
+  #   python agent.py --upload-token
+
+  # ── IAM Role ─────────────────────────────────────────────────────────────
+
+  AgentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: SecretsAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:PutSecretValue
+                  - secretsmanager:CreateSecret
+                Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${SecretPrefix}/*"
+
+  # ── Lambda ────────────────────────────────────────────────────────────────
+
+  GmailAgentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      Role: !GetAtt AgentRole.Arn
+      Timeout: 900        # 15 min — max Lambda allows
+      MemorySize: 512
+      Environment:
+        Variables:
+          LAMBDA_MODE: "1"
+          SECRET_PREFIX: !Ref SecretPrefix
+          MAX_THREADS: !Ref MaxThreads
+          # ANTHROPIC_API_KEY is read from Secrets Manager at runtime in gmail_auth.py
+          # Load it in lambda_function.py via boto3 to avoid storing in plain env vars
+      Events:
+        Schedule:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: !Ref ScheduleExpression
+            FlexibleTimeWindow:
+              Mode: FLEXIBLE
+              MaximumWindowInMinutes: 5
+    Metadata:
+      DockerTag: latest
+      DockerContext: .
+      Dockerfile: Dockerfile
+
+Outputs:
+  FunctionArn:
+    Value: !GetAtt GmailAgentFunction.Arn
+  LogGroup:
+    Value: !Sub "/aws/lambda/${GmailAgentFunction}"
