@@ -1,0 +1,12 @@
+line-length = 100
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E501",  # line too long — handled by formatter
+]
+exclude = ["tests/conftest.py"]
+
+[lint.isort]
+known-first-party = ["agent", "gmail_auth", "lambda_function", "profiler", "user_profile"]

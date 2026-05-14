@@ -1,0 +1,50 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Prevent concurrent deploys
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+
+  deploy:
+    name: SAM deploy
+    runs-on: ubuntu-latest
+    environment: production   # requires manual approval in GitHub settings
+    permissions:
+      id-token: write         # for OIDC auth with AWS
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # Use OIDC (no long-lived keys) — set up once in AWS + GitHub:
+          # https://docs.github.com/en/actions/security-for-github-actions/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: SAM build
+        run: sam build
+
+      - name: SAM deploy
+        run: |
+          sam deploy \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              AnthropicApiKey=${{ secrets.ANTHROPIC_API_KEY }} \
+              AlertEmail=${{ secrets.ALERT_EMAIL }}

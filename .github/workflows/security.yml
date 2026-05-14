@@ -1,0 +1,101 @@
+name: Security Scan
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1"  # Every Monday at 06:00 UTC
+
+jobs:
+
+  # ── Python static analysis ─────────────────────────────────────────────────
+  bandit:
+    name: SAST — Bandit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install bandit
+      - name: Run Bandit
+        run: |
+          bandit -r agent.py gmail_auth.py lambda_function.py \
+            --severity-level medium \
+            --confidence-level medium \
+            -f json -o bandit-report.json || true
+          bandit -r agent.py gmail_auth.py lambda_function.py \
+            --severity-level medium \
+            --confidence-level medium
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bandit-report
+          path: bandit-report.json
+
+  # ── Dependency CVE audit ────────────────────────────────────────────────────
+  pip-audit:
+    name: Dependencies — pip-audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install pip-audit
+      - name: Audit dependencies
+        run: pip-audit -r requirements.txt --output-format json --output pip-audit-report.json || true
+      - name: Show results
+        run: pip-audit -r requirements.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pip-audit-report
+          path: pip-audit-report.json
+
+  # ── Container image CVE scan ────────────────────────────────────────────────
+  trivy:
+    name: Container — Trivy
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write   # to upload SARIF to GitHub Security tab
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image for scanning
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: gmail-agent:scan
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: gmail-agent:scan
+          format: sarif
+          output: trivy-report.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "0"       # base image OS CVEs are AWS's to fix; findings visible in Security tab
+          ignore-unfixed: true
+
+      - name: Upload Trivy results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-report.sarif
+
+  # ── Secret detection ────────────────────────────────────────────────────────
+  gitleaks:
+    name: Secrets — Gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history so gitleaks can scan all commits
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
