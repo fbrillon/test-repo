@@ -171,7 +171,41 @@ With a single shared Lambda, cross-user access is enforced **by application code
 
 **Not acceptable for:** a commercial multi-tenant SaaS where users are strangers.
 
-For stronger isolation (IAM-enforced), each user would need a dedicated Lambda with a dedicated IAM role scoped to `gmail-agent/{user_id}/*`. That eliminates any cross-user risk but means N Lambda deployments.
+### Security roadmap (not yet implemented)
+
+#### 20–5 000 users — STS AssumeRole per user
+
+One Lambda, one IAM role per user scoped to `gmail-agent/{user_id}/*`. The Lambda's
+base role has only `sts:AssumeRole`; it assumes the user-specific role at invocation
+start and gets temporary credentials (15 min) that can only reach that user's secrets.
+Adding a user = `add-user.sh` creates the IAM role, no redeploy needed.
+
+```
+Lambda (base role: sts:AssumeRole only)
+  └─ AssumeRole → role-gmail-agent-alice  (access: gmail-agent/alice/* only)
+  └─ AssumeRole → role-gmail-agent-bob   (access: gmail-agent/bob/*  only)
+```
+
+#### 5 000–500 000 users — ABAC + DynamoDB/KMS
+
+At this scale Secrets Manager becomes expensive (~$0.40/secret/month) and
+hits operational limits. Switch to:
+
+- **DynamoDB** for token storage (encrypted at rest, ~$0.25/million reads)
+- **KMS customer-managed key per user** for envelope encryption (IAM-enforced)
+- **STS session tags** (`UserId=alice`) + IAM ABAC condition on KMS key tags:
+  `StringEquals: {"aws:ResourceTag/Owner": "${aws:PrincipalTag/UserId}"}`
+- **SQS** for job dispatch (one message per user) instead of one schedule per user
+- **Cognito** for user authentication and OAuth callback (replaces the local `add-user.sh` flow)
+
+At this scale other concerns dominate before IAM isolation: Anthropic API rate
+limits (shared key across all users), GDPR data residency, per-user billing, and
+a proper web onboarding flow.
+
+#### 500 000+ users — multi-account
+
+Separate AWS account per tenant group via AWS Organizations + Control Tower.
+Account-level isolation is the strongest boundary AWS offers.
 
 ## Notes
 
