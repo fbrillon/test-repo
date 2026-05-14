@@ -111,7 +111,7 @@ def _get_local_credentials(
     creds = None
     if Path(token_path).exists():
         with open(token_path, "rb") as f:
-            creds = pickle.load(f)
+            creds = pickle.load(f)  # nosec B301 — file written by this process, not from network
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
