@@ -1,38 +1,22 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 
-Description: Gmail Email Labeling Agent — Lambda + EventBridge
+Description: Gmail Email Labeling Agent — Lambda + EventBridge (multi-user)
 
 Parameters:
   AnthropicApiKey:
     Type: String
     NoEcho: true
-    Description: Anthropic API key (stored in Secrets Manager, not in env vars)
-
-  ScheduleExpression:
-    Type: String
-    Default: rate(15 minutes)
-    Description: How often to run the triage agent
+    Description: Anthropic API key (written to Secrets Manager)
 
   MaxThreads:
     Type: Number
     Default: 50
-    Description: Max unread threads to process per run
+    Description: Default max unread threads per run (overridable per schedule via event payload)
 
-  UserId:
-    Type: String
-    Default: ""
-    Description: >
-      Optional user identifier for multi-user deployments.
-      When set, secrets are stored under gmail-agent/{UserId}/token etc.
-      Leave empty for single-user deployment (uses gmail-agent/ prefix).
-
-Conditions:
-  HasUserId: !Not [!Equals [!Ref UserId, ""]]
+# ── Secrets ────────────────────────────────────────────────────────────────
 
 Resources:
-
-  # ── Secrets ──────────────────────────────────────────────────────────────
 
   AnthropicSecret:
     Type: AWS::SecretsManager::Secret
@@ -40,10 +24,11 @@ Resources:
       Name: gmail-agent/anthropic-api-key
       SecretString: !Ref AnthropicApiKey
 
-  # gmail-agent/token and gmail-agent/credentials are created by:
-  #   python agent.py --upload-token
+  # Per-user secrets are created by:  python agent.py --user <id> --upload-token
+  # Layout: gmail-agent/{user_id}/token
+  #         gmail-agent/{user_id}/credentials
 
-  # ── IAM Role ─────────────────────────────────────────────────────────────
+  # ── IAM ────────────────────────────────────────────────────────────────────
 
   AgentRole:
     Type: AWS::IAM::Role
@@ -69,33 +54,41 @@ Resources:
                   - secretsmanager:CreateSecret
                 Resource: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:gmail-agent/*"
 
-  # ── Lambda ────────────────────────────────────────────────────────────────
+  # ── IAM role for EventBridge Scheduler ──────────────────────────────────
+
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeLambda
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt GmailAgentFunction.Arn
+
+  # ── Lambda ─────────────────────────────────────────────────────────────────
+  # One shared function — user_id comes from each schedule's input payload.
 
   GmailAgentFunction:
     Type: AWS::Serverless::Function
     Properties:
       PackageType: Image
       Role: !GetAtt AgentRole.Arn
-      Timeout: 900        # 15 min — max Lambda allows
+      Timeout: 900
       MemorySize: 512
       Environment:
         Variables:
           LAMBDA_MODE: "1"
-          SECRET_PREFIX: !If
-            - HasUserId
-            - !Sub "gmail-agent/${UserId}"
-            - gmail-agent
           MAX_THREADS: !Ref MaxThreads
-          # ANTHROPIC_API_KEY is read from Secrets Manager at runtime in gmail_auth.py
-          # Load it in lambda_function.py via boto3 to avoid storing in plain env vars
-      Events:
-        Schedule:
-          Type: ScheduleV2
-          Properties:
-            ScheduleExpression: !Ref ScheduleExpression
-            FlexibleTimeWindow:
-              Mode: FLEXIBLE
-              MaximumWindowInMinutes: 5
     Metadata:
       DockerTag: latest
       DockerContext: .
@@ -104,5 +97,9 @@ Resources:
 Outputs:
   FunctionArn:
     Value: !GetAtt GmailAgentFunction.Arn
+    Description: Pass this ARN to add-user.sh when onboarding a new user
+  SchedulerRoleArn:
+    Value: !GetAtt SchedulerRole.Arn
+    Description: Pass this ARN to add-user.sh when onboarding a new user
   LogGroup:
     Value: !Sub "/aws/lambda/${GmailAgentFunction}"

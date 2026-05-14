@@ -97,23 +97,27 @@ EventBridge Scheduler (every 15 min)
 - AWS SAM CLI installed (`brew install aws-sam-cli`)
 - Docker running
 
-### One-time setup
-
-**Step 1 — Authenticate Gmail locally and upload token to Secrets Manager**
-
-```bash
-pip install -r requirements.txt
-python agent.py --upload-token   # opens browser for OAuth, then uploads to AWS
-```
-
-**Step 2 — Build and deploy**
+### One-time deploy
 
 ```bash
 sam build
-sam deploy --guided   # follow prompts; enter your Anthropic API key when asked
+sam deploy --guided   # enter Anthropic API key when prompted
 ```
 
-SAM will create the Lambda function, ECR image, IAM role, and EventBridge schedule.
+SAM creates the Lambda function (container image), IAM roles, and exports `FunctionArn` + `SchedulerRoleArn`.
+
+### Adding a user (one command)
+
+```bash
+./add-user.sh alice <FunctionArn> <SchedulerRoleArn>
+# custom schedule:
+./add-user.sh bob   <FunctionArn> <SchedulerRoleArn> "rate(30 minutes)"
+./add-user.sh carol <FunctionArn> <SchedulerRoleArn> "cron(0 8 * * ? *)"
+```
+
+Each user gets their own EventBridge schedule. The script authenticates Gmail locally, uploads the token to Secrets Manager (`gmail-agent/{user}/token`), then creates the schedule with `{"user_id": "alice"}` as event payload.
+
+Each schedule is independent — different frequencies, different users, one shared Lambda.
 
 ### Useful commands
 
@@ -121,20 +125,21 @@ SAM will create the Lambda function, ECR image, IAM role, and EventBridge schedu
 # View live logs
 aws logs tail /aws/lambda/GmailAgentFunction --follow
 
-# Trigger manually
-aws lambda invoke --function-name GmailAgentFunction /dev/stdout
+# Trigger a specific user manually
+aws lambda invoke \
+  --function-name GmailAgentFunction \
+  --payload '{"user_id":"alice"}' \
+  /dev/stdout
 
-# Change schedule (edit template.yaml ScheduleExpression, then redeploy)
-sam deploy
-```
+# List all schedules
+aws scheduler list-schedules --name-prefix gmail-agent-
 
-### Re-authenticating Gmail
+# Remove a user
+aws scheduler delete-schedule --name gmail-agent-alice
 
-If the OAuth token ever becomes invalid (e.g., password change, revocation):
-
-```bash
+# Re-authenticate Gmail (token expired or revoked)
 rm token.pickle
-python agent.py --upload-token
+./add-user.sh alice <FunctionArn> <SchedulerRoleArn>
 ```
 
 ## Files
